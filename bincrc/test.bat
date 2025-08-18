@@ -2,8 +2,8 @@
 echo Creating test directory...
 mkdir test 2>nul
 
-echo Generating 256-byte binary file with values 0x00 to 0xFF...
-powershell -Command "[byte[]]$bytes = 0..255; [System.IO.File]::WriteAllBytes('test\test.bin', $bytes)"
+echo Generating 4096-byte binary file with values 0x00 to 0xFF repeated...
+powershell -Command "[byte[]]$bytes = @(0..255) * 16; [System.IO.File]::WriteAllBytes('test\test.bin', $bytes)"
 
 echo Compiling BinCRC program...
 mingw32-make
@@ -16,6 +16,9 @@ BinCRC.exe CRC16 test\test.bin
 
 echo Testing CRC32...
 BinCRC.exe CRC32 test\test.bin
+
+echo Testing with specified length...
+BinCRC.exe CRC8 test\test.bin 5000
 
 echo All tests completed.
 dir test

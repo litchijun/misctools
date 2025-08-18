@@ -8,6 +8,7 @@ $(TARGET): $(SOURCE)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SOURCE)
 
 clean:
-	del $(TARGET)
+	del $(TARGET) 2>nul || exit 0
+	if exist test rmdir /s /q test
 
 .PHONY: clean

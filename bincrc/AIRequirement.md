@@ -107,5 +107,5 @@ unsigned int crc32(unsigned int *message, unsigned int msgsize, unsigned int crc
 
 ## 测试素材生成并测试
 1. 创建一个test 文件夹
-2. 创建一个 256字节的bin 文件， 文件内容就是 0x00 - 0xFF
+2. 创建一个 4096 字节的bin 文件， 文件为 0x00 - 0xFF的重复
 3. 分别使用 CRC8, CRC16, CRC32 追加校验值到 bin 问末尾
