@@ -139,32 +139,33 @@ int processFile(const std::string& method, const std::string& filePath, int leng
     int calcLength = (length == -1) ? fileSize : length;
     
     // Read file data
+    // According to new logic, we need to append 16 bytes of 0xFF at the end
+    // and the last 16 bytes contain 8 bytes length + 8 bytes CRC
     std::vector<unsigned char> data(calcLength);
     inFile.read(reinterpret_cast<char*>(data.data()), fileSize);
     inFile.close();
 
     // Fill with 0xFF if needed
-    for (int i = fileSize; i < calcLength; i++) {
+    // According to new logic, if calcLength > fileSize, fill with 0xFF
+    // But we need to reserve 16 bytes at the end for length+CRC
+    for (int i = fileSize; i < calcLength - 16; i++) {
         data[i] = 0xFF;
     }
 
-    // Calculate CRC
+    // Fill the last 16 bytes with 0xFF initially
+    for (int i = calcLength - 16; i < calcLength; i++) {
+        data[i] = 0xFF;
+    }
+
+    // Calculate CRC on the data excluding the last 16 bytes
     unsigned int crcValue = 0;
     if (method == "CRC8") {
-        // For CRC8, we need to leave space for the CRC byte
-        int dataLength = calcLength - 1;
-        crcValue = crc8(data.data(), dataLength);
-        data[calcLength - 1] = static_cast<unsigned char>(crcValue & 0xFF);
+        crcValue = crc8(data.data(), calcLength - 16);
     } else if (method == "CRC16") {
-        // For CRC16, we need to leave space for the CRC bytes
-        int dataLength = calcLength - 2;
-        crcValue = crc16(data.data(), dataLength);
-        data[calcLength - 2] = static_cast<unsigned char>((crcValue >> 8) & 0xFF);
-        data[calcLength - 1] = static_cast<unsigned char>(crcValue & 0xFF);
+        crcValue = crc16(data.data(), calcLength - 16);
     } else if (method == "CRC32") {
-        // For CRC32, we need to leave space for the CRC bytes
-        int dataLength = calcLength - 4;
-        // Convert byte array to word array for CRC32
+        // For CRC32, convert byte array to word array
+        int dataLength = calcLength - 16;
         std::vector<unsigned int> wordData((dataLength + 3) / 4);
         for (int i = 0; i < dataLength; i += 4) {
             unsigned int word = 0;
@@ -174,15 +175,22 @@ int processFile(const std::string& method, const std::string& filePath, int leng
             wordData[i / 4] = word;
         }
         crcValue = crc32(wordData.data(), wordData.size());
-        
-        // Store CRC32 in little-endian format
-        data[calcLength - 4] = static_cast<unsigned char>(crcValue & 0xFF);
-        data[calcLength - 3] = static_cast<unsigned char>((crcValue >> 8) & 0xFF);
-        data[calcLength - 2] = static_cast<unsigned char>((crcValue >> 16) & 0xFF);
-        data[calcLength - 1] = static_cast<unsigned char>((crcValue >> 24) & 0xFF);
     } else {
         std::cerr << "Error: Unknown CRC method " << method << std::endl;
         return 1;
+    }
+
+    // Store file length and CRC value in the last 16 bytes
+    // First 8 bytes: file length (as 64-bit value)
+    unsigned long long fileLength = static_cast<unsigned long long>(fileSize);
+    for (int i = 0; i < 8; i++) {
+        data[calcLength - 16 + i] = static_cast<unsigned char>((fileLength >> (i * 8)) & 0xFF);
+    }
+    
+    // Last 8 bytes: CRC value (as 64-bit value)
+    unsigned long long crc64 = static_cast<unsigned long long>(crcValue);
+    for (int i = 0; i < 8; i++) {
+        data[calcLength - 8 + i] = static_cast<unsigned char>((crc64 >> (i * 8)) & 0xFF);
     }
 
     // Generate output filename with CRC value
@@ -193,6 +201,7 @@ int processFile(const std::string& method, const std::string& filePath, int leng
     std::stringstream ss;
     ss << std::hex << std::uppercase << std::setfill('0');
     
+    // For the filename, use the appropriate number of digits based on CRC type
     if (method == "CRC8") {
         ss << std::setw(2) << (crcValue & 0xFF);
     } else if (method == "CRC16") {
@@ -215,7 +224,8 @@ int processFile(const std::string& method, const std::string& filePath, int leng
     outFile.close();
     
     std::cout << "File processed successfully. Output: " << outputFileName << std::endl;
-    std::cout << "CRC Value: 0x" << crcString << std::endl;
+    std::cout << "CRC Value: 0x" << std::hex << std::uppercase << crcValue << std::dec << std::endl;
+    std::cout << "File Size: " << fileSize << std::endl;
     
     return 0;
 }
