@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++11 -O2 -Wall -static-libgcc -static-libstdc++
+CXXFLAGS = -std=c++11 -O2 -Wall -static -static-libgcc -static-libstdc++
 
 TARGET = BinCRC.exe
 SOURCE = BinCRC.cpp
