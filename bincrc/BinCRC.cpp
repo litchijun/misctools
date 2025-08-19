@@ -235,7 +235,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: " << argv[0] << " <crc_method> <bin_file_path> [crc_calculation_length]" << std::endl;
         std::cerr << "  crc_method: CRC8, CRC16, or CRC32" << std::endl;
         std::cerr << "  bin_file_path: Path to the binary file" << std::endl;
-        std::cerr << "  crc_calculation_length: Optional, default is file size" << std::endl;
+        std::cerr << "  crc_calculation_length: Optional, default is file size, supports hex format (0x...)" << std::endl;
         return 1;
     }
     
@@ -244,7 +244,16 @@ int main(int argc, char* argv[]) {
     int length = -1;
     
     if (argc > 3) {
-        length = std::stoi(argv[3]);
+        std::string lengthStr = argv[3];
+        // Check if the length is in hexadecimal format (starts with "0x" or "0X")
+        if (lengthStr.length() > 2 && 
+            (lengthStr[0] == '0' && (lengthStr[1] == 'x' || lengthStr[1] == 'X'))) {
+            // Parse hexadecimal string
+            length = std::stoi(lengthStr.substr(2), nullptr, 16);
+        } else {
+            // Parse decimal string
+            length = std::stoi(lengthStr);
+        }
     }
     
     return processFile(method, filePath, length);
