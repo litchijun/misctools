@@ -6,8 +6,7 @@
 #include <cstring>
 
 #define CRC32_POLY 0x04C11DB7
-#define BOARD_TYPE 0x12
-#define CRC32_INIT (0x7ce69b00 | BOARD_TYPE)
+#define CRC32_INIT(board_type) (0x7ce69b00 | (board_type))
 
 unsigned int _crc32(unsigned int *message, unsigned int msgsize, unsigned int crc = 0xFFFFFFFF)
 {
@@ -34,12 +33,12 @@ unsigned int _crc32(unsigned int *message, unsigned int msgsize, unsigned int cr
     return crc;
 }
 
-uint32_t crc32(const uint8_t* message, size_t msgsize) {
+uint32_t crc32(const uint8_t* message, size_t msgsize, uint8_t board_type) {
     uint32_t crc = 0xFFFFFFFF;
     uint32_t poly = CRC32_POLY;
 
     // Add start data
-    uint32_t start_data = CRC32_INIT;
+    uint32_t start_data = CRC32_INIT(board_type);
     crc = _crc32(&start_data, 1);
 
     // Process message
@@ -49,7 +48,7 @@ uint32_t crc32(const uint8_t* message, size_t msgsize) {
     }
 
     // Add end data
-    uint32_t end_data = 0x67e67e00 | BOARD_TYPE;
+    uint32_t end_data = CRC32_INIT(board_type) ^ 0x67e67e00;
     crc = _crc32(&end_data, 1, crc);
 
     return crc;
@@ -65,13 +64,26 @@ uint8_t checksum(const uint8_t* data, size_t size) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <bin_file_path>" << std::endl;
+    uint8_t BOARD_TYPE = 0x12; // default value
+    
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <bin_file_path> [board_type_hex]" << std::endl;
         return 1;
     }
-
+    
     std::string inputFilePath = argv[1];
     
+    // If second argument is provided, use it as BOARD_TYPE
+    if (argc >= 3) {
+        // Convert string argument to hex value
+        std::string boardTypeStr = argv[2];
+        try {
+            BOARD_TYPE = static_cast<uint8_t>(std::stoi(boardTypeStr, nullptr, 16));
+        } catch (...) {
+            std::cerr << "Error: Invalid board type format. Using default value 0x12." << std::endl;
+        }
+    }
+
     // Read the input file
     std::ifstream inputFile(inputFilePath, std::ios::binary);
     if (!inputFile) {
@@ -82,9 +94,9 @@ int main(int argc, char* argv[]) {
     // Read file into buffer
     std::vector<uint8_t> bufferData(std::istreambuf_iterator<char>(inputFile), {});
     inputFile.close();
-    
+
     size_t fileLength = bufferData.size();
-    
+
     // Step 1: Modify bytes 0x1010-0x1013 if file length > 0x1013
     if (fileLength > 0x1013) {
         bufferData[0x1010] = fileLength & 0xFF;
@@ -92,7 +104,7 @@ int main(int argc, char* argv[]) {
         bufferData[0x1012] = (fileLength >> 16) & 0xFF;
         bufferData[0x1013] = (fileLength >> 24) & 0xFF;
     }
-    
+
     // Step 2: Save with "_FF" appended to filename
     size_t lastDot = inputFilePath.find_last_of('.');
     std::string ffFilePath;
@@ -101,7 +113,7 @@ int main(int argc, char* argv[]) {
     } else {
         ffFilePath = inputFilePath + "_FF";
     }
-    
+
     std::ofstream ffFile(ffFilePath, std::ios::binary);
     if (!ffFile) {
         std::cerr << "Error: Cannot create file " << ffFilePath << std::endl;
@@ -109,7 +121,7 @@ int main(int argc, char* argv[]) {
     }
     ffFile.write(reinterpret_cast<const char*>(bufferData.data()), bufferData.size());
     ffFile.close();
-    
+
     // Step 3: Encrypt to create test_enc.bin
     std::string encFilePath;
     if (lastDot != std::string::npos) {
@@ -117,17 +129,17 @@ int main(int argc, char* argv[]) {
     } else {
         encFilePath = inputFilePath + "_EN";
     }
-    
+
     std::ofstream encFile(encFilePath, std::ios::binary);
     if (!encFile) {
         std::cerr << "Error: Cannot create file " << encFilePath << std::endl;
         return 1;
     }
-    
+
     // Calculate max packet number (only for data packets, not including header)
     // Updated calculation: max_packet_num = ((fileLength + (56 -1)) / 56) - 1
     size_t maxPacketNum = ((fileLength + 55) / 56) - 1;
-    
+
     // Create header packet (64 bytes) -引导包
     std::vector<uint8_t> headerPacket(64, 0);
     headerPacket[0] = 0xFE;
@@ -135,7 +147,7 @@ int main(int argc, char* argv[]) {
     headerPacket[2] = (fileLength + 256 + 1023) / 1024;
     headerPacket[3] = maxPacketNum & 0xFF;
     headerPacket[4] = (maxPacketNum >> 8) & 0xFF;
-    
+
     // Copy and invert original data from 0x1000-0x100E to header packet bytes 8-22
     // Note: 0x1000-0x100E is 15 bytes, so we copy to bytes 8-22 (15 bytes)
     if (fileLength >= 0x100F) {
@@ -143,20 +155,20 @@ int main(int argc, char* argv[]) {
             headerPacket[8 + i] = ~bufferData[0x1000 + i]; // Invert data
         }
     }
-    
+
     // Byte 23 is 0x00 as specified
     headerPacket[23] = 0x00;
-    
+
     // Calculate checksum for bytes 0-4
     headerPacket[5] = checksum(headerPacket.data(), 5);
-    
+
     // Calculate CRC32 for bytes 8-23 and store in bytes 24-27 (little-endian)
-    uint32_t headerCrc = crc32(headerPacket.data() + 8, 16);
+    uint32_t headerCrc = crc32(headerPacket.data() + 8, 16, BOARD_TYPE);
     headerPacket[24] = headerCrc & 0xFF;
     headerPacket[25] = (headerCrc >> 8) & 0xFF;
     headerPacket[26] = (headerCrc >> 16) & 0xFF;
     headerPacket[27] = (headerCrc >> 24) & 0xFF;
-    
+
     // Bytes 28-63 are 0x00 as specified
     // They are already 0x00 due to initialization
 
@@ -170,38 +182,38 @@ int main(int argc, char* argv[]) {
         dataPacket[1] = 0x07;
         dataPacket[2] = packetIndex & 0xFF;
         dataPacket[3] = (packetIndex >> 8) & 0xFF;
-        
+
         // Copy and invert data
         size_t dataOffset = packetIndex * 56;
         size_t dataBytesToCopy = 56;
         if (dataOffset + dataBytesToCopy > fileLength) {
             dataBytesToCopy = fileLength - dataOffset;
         }
-        
+
         for (size_t i = 0; i < dataBytesToCopy; i++) {
             dataPacket[8 + i] = ~bufferData[dataOffset + i]; // Invert data
         }
         // Remaining bytes are already 0xFF due to initialization
-        
+
         // Calculate checksum for bytes 8-63
         dataPacket[4] = checksum(dataPacket.data() + 8, 56);
-        
+
         // Calculate CRC32 for bytes 8-63
-        uint32_t dataCrc = crc32(dataPacket.data() + 8, 56);
+        uint32_t dataCrc = crc32(dataPacket.data() + 8, 56, BOARD_TYPE);
         dataPacket[5] = dataCrc & 0xFF;
         dataPacket[6] = (dataCrc >> 8) & 0xFF;
         dataPacket[7] = 0x00;
-        
+
         // Write data packet
         encFile.write(reinterpret_cast<const char*>(dataPacket.data()), dataPacket.size());
     }
-    
+
     encFile.close();
-    
+
     std::cout << "Processing completed successfully!" << std::endl;
     std::cout << "Generated files:" << std::endl;
     std::cout << "  " << ffFilePath << std::endl;
     std::cout << "  " << encFilePath << std::endl;
-    
+
     return 0;
 }
